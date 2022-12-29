@@ -186,7 +186,10 @@ public class DalyClient {
      - Returns: An object with the requested information
      */
     public func getStatus(timeout: TimeInterval = 1.0) async throws -> StatusInformation {
-        try await requestFrame(timeout: timeout)
+        let status: StatusInformation = try await requestFrame(timeout: timeout)
+        self.cellTemperatureCount = status.temperatureSensorCount
+        self.cellCount = status.cellCount
+        return status
     }
 
     private func getCellCount(timeout: TimeInterval) async throws -> Int {
@@ -194,7 +197,6 @@ public class DalyClient {
             return cellCount
         }
         let status = try await getStatus(timeout: timeout)
-        self.cellCount = status.cellCount
         return status.cellCount
     }
 
@@ -203,7 +205,6 @@ public class DalyClient {
             return cellTemperatureCount
         }
         let status = try await getStatus(timeout: timeout)
-        self.cellTemperatureCount = status.temperatureSensorCount
         return status.temperatureSensorCount
     }
 
