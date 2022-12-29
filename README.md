@@ -40,6 +40,10 @@ Simply add the package as a dependency in `Package.swift`:
 .package(url: "https://github.com/christophhagen/Daly-Swift", from: "0.9.0")
 ```
 
+## Additions to the library
+
+This library implements only the functionality that I could find publicly available. If you have additional information about other features, especially the ability to set parameters, please let me know, or contribute to this library.
+
 ## License
 
 [MIT](License.md)
