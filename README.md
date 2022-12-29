@@ -42,7 +42,7 @@ Simply add the package as a dependency in `Package.swift`:
 
 ## Additions to the library
 
-This library implements only the functionality that I could find publicly available. If you have additional information about other features, especially the ability to set parameters, please let me know, or contribute to this library.
+This library implements only the functionality that I could find [publicly available](Docs/DALY-UART%20485%20Communications%20Protocol%20v1.2). If you have additional information about other features, especially the ability to set parameters, please let me know, or contribute to this library.
 
 ## License
 
