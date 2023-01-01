@@ -74,23 +74,29 @@ public class DalyClient {
         }
         let responseData = try await client.readBytesBlocking(count: expectedResponseLength, timeout: timeout)
 
-        let frames = try (0..<command.frameCount).map { i in
-            let start = i * frameLength
-            let end = start + frameLength - 1
-            guard end < responseData.count else {
-                print("Frame \(i) ends at \(end), but only \(responseData.count) bytes read")
-                throw DalyError.invalidResponseLength
+        do {
+            let frames = try (0..<command.frameCount).map { i in
+                let start = i * frameLength
+                let end = start + frameLength - 1
+                guard end < responseData.count else {
+                    print("Frame \(i) ends at \(end), but only \(responseData.count) bytes read")
+                    throw DalyError.invalidResponseLength
+                }
+                let frameData = Array(responseData[start...end])
+                return try extractBMSFrame(frameData)
             }
-            let frameData = Array(responseData[start...end])
-            return try extractBMSFrame(frameData)
-        }
-        for frame in frames {
-            if frame.command != command.code {
-                print("Received frame has command \(frame.command.rawValue), not \(command.code.rawValue)")
-                throw DalyError.incompleteFrames
+            for frame in frames {
+                if frame.command != command.code {
+                    print("Received frame has command \(frame.command.rawValue), not \(command.code.rawValue)")
+                    throw DalyError.incompleteFrames
+                }
             }
+            return frames.map { $0.payload }
+        } catch {
+            // Read all bytes to reset the client
+            _ = try await client.readBytes(count: 100)
+            throw error
         }
-        return frames.map { $0.payload }
     }
 
     /**
