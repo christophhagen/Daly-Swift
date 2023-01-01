@@ -42,6 +42,7 @@ public class DalyClient {
         try await client.open(
             receiveRate: baudRate,
             transmitRate: baudRate,
+            minimumBytesToRead: 0,
             timeout: timeout,
             parity: parity,
             stopBits: stopBits,
