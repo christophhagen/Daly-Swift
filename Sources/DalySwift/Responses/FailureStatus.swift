@@ -113,5 +113,8 @@ extension FailureStatus.Failures {
         rawValue += UInt64(bytes[6]) << 8
         self.rawValue = rawValue
     }
+}
 
+extension FailureStatus: Equatable {
+    
 }

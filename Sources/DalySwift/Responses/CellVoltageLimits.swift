@@ -33,3 +33,7 @@ extension CellVoltageLimits: SingleFrameResponse {
         self.minimumVoltageCell = Int(bytes[5])
     }
 }
+
+extension CellVoltageLimits: Equatable {
+    
+}

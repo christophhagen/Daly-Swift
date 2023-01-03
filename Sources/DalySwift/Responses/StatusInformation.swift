@@ -51,3 +51,7 @@ extension StatusInformation: SingleFrameResponse {
         self.do4 = byte5 & 0x80 > 0
     }
 }
+
+extension StatusInformation: Equatable {
+    
+}

@@ -33,3 +33,7 @@ extension CellTemperatureLimits: SingleFrameResponse {
         self.minimumTemperatureCell = Int(bytes[3])
     }
 }
+
+extension CellTemperatureLimits: Equatable {
+
+}

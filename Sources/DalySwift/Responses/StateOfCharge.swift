@@ -33,3 +33,7 @@ extension StateOfCharge: SingleFrameResponse {
         self.stateOfCharge = .init(high: bytes[6], low: bytes[7], scale: 0.1)
     }
 }
+
+extension StateOfCharge: Equatable {
+
+}

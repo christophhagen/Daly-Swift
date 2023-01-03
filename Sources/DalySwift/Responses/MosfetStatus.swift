@@ -49,3 +49,7 @@ extension MosfetStatus: SingleFrameResponse {
         self.remainingCapacity = .init(bytes[4...7])
     }
 }
+
+extension MosfetStatus: Equatable {
+
+}
