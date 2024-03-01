@@ -8,7 +8,8 @@ public class DalyClient {
 
     private let startByte: UInt8 = 0xA5
 
-    private let bmsAddress: UInt8 = 0x01
+    /// The id of the BMS (default: `0x01`)
+    public let bmsAddress: UInt8
 
     private let frameLength = 13
 
@@ -23,9 +24,11 @@ public class DalyClient {
     /**
      Create a client.
      - Parameter path: The path to the serial port where the BMS is connected.
+     - Parameter bmsAddress: The id of the BMS (default: `0x01`)
      */
-    public init(path: String) {
+    public init(path: String, bmsAddress: UInt8 = 0x01) {
         self.client = SerialPort(path: path)
+        self.bmsAddress = bmsAddress
     }
 
     /**
