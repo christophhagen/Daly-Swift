@@ -1,6 +1,8 @@
 import Foundation
 import SwiftSerial
 
+typealias Frame = (command: Command.Code, address: UInt8, payload: [UInt8])
+
 /**
  A client to request information from a Daly BMS.
  */
@@ -8,10 +10,10 @@ public class DalyClient {
 
     private let startByte: UInt8 = 0xA5
 
-    /// The address of the client. Sent by the BMS in the header.
-    public let bmsAddress: UInt8
-
     private let frameLength = 13
+
+    /// The number of BMS connected to the bus.
+    public let numberOfDevices: Int
 
     private let client: SerialPort
 
@@ -30,15 +32,14 @@ public class DalyClient {
      Create a client.
      - Parameter path: The path to the serial port where the BMS is connected.
      - Parameter id: The id of the connecting client (default `0x40)
-     - Parameter bmsAddress: The address of the BMS (default `0x01`)
+     - Parameter numberOfDevices: The number of BMS connected to the bus.
      - Note: The available documentation is inconsistent on the values of `id`.
      It seems that the value identifies the sender of BMS commands, but the values for different sources (e.g. Bluetooth App, Computer) are often switched. The default value should work, but try using different values of you encounter problems.
-     - Note: Some BMS firmwares allow changing the default BMS address. The client checks for the correct address in the BMS responses, and fails if the address is invalid. Only set a different value if you changed the address of your BMS.
      */
-    public init(path: String, id: ClientId = .address0x40, bmsAddress: UInt8 = 0x01) {
+    public init(path: String, id: ClientId = .address0x40, numberOfDevices: Int = 1) {
         self.client = SerialPort(path: path)
         self.clientId = id
-        self.bmsAddress = bmsAddress
+        self.numberOfDevices = numberOfDevices
     }
 
     /**
@@ -78,35 +79,21 @@ public class DalyClient {
     /**
      Send a request and expect multiple frames as the response.
      */
-    private func requestFrames(_ command: Command, timeout: TimeInterval) async throws -> [[UInt8]] {
+    private func requestFrames(_ command: Command, bmsAddress: UInt8, timeout: TimeInterval) async throws -> [[UInt8]] {
         let requestData = createRequestData(command: command)
-        let expectedResponseLength = command.frameCount * frameLength
+        let expectedResponseLength = command.frameCount * frameLength * numberOfDevices
         // Send request to BMS
         guard try await client.writeBytes(requestData) == requestData.count else {
             throw DalyError.failedToTransmitRequest
         }
-        let responseData = try await client.readBytesBlocking(count: expectedResponseLength, timeout: timeout)
+        let data = try await client.readBytesBlocking(count: expectedResponseLength, timeout: timeout)
 
         do {
-            let frames = try (0..<command.frameCount).map { i in
-                let start = i * frameLength
-                let end = start + frameLength - 1
-                guard end < responseData.count else {
-                    print("Frame \(i) ends at \(end), but only \(responseData.count) bytes read")
-                    throw DalyError.invalidResponseLength
-                }
-                let frameData = Array(responseData[start...end])
-                let frame = try extractFrame(frameData)
-                guard frame.address == bmsAddress else {
-                    throw DalyError.headerMismatch
-                }
-                return (command: frame.command, payload: frame.payload)
-            }
-            for frame in frames {
-                if frame.command != command.code {
-                    print("Received frame has command \(frame.command.rawValue), not \(command.code.rawValue)")
-                    throw DalyError.incompleteFrames
-                }
+            let frames = decodeFrames(from: data)
+                .filter { $0.address == bmsAddress }
+                .filter { $0.command == command.code }
+            guard frames.count >= command.frameCount else {
+                throw DalyError.incompleteFrames
             }
             return frames.map { $0.payload }
         } catch {
@@ -116,25 +103,36 @@ public class DalyClient {
         }
     }
 
+    private func decodeFrames(from data: Data) -> [Frame] {
+        stride(from: data.startIndex, to: data.endIndex, by: frameLength).compactMap { start in
+            let end = start + frameLength
+            guard end <= data.endIndex else {
+                return nil
+            }
+            let frameData = Array(data[start..<end])
+            return try? extractFrame(frameData)
+        }
+    }
+
     /**
      Send a request and expect a single response frame
      */
-    private func requestFrame(_ command: Command, timeout: TimeInterval) async throws -> [UInt8] {
-        try await requestFrames(command, timeout: timeout).first!
+    private func requestFrame(_ command: Command, bmsAddress: UInt8, timeout: TimeInterval) async throws -> [UInt8] {
+        try await requestFrames(command, bmsAddress: bmsAddress, timeout: timeout).first!
     }
 
     /**
      Send a request and transform the received response frame to a type.
      */
-    private func requestFrame<T>(timeout: TimeInterval) async throws -> T where T: SingleFrameResponse {
-        let frame = try await requestFrame(T.command, timeout: timeout)
+    private func requestFrame<T>(bmsAddress: UInt8, timeout: TimeInterval) async throws -> T where T: SingleFrameResponse {
+        let frame = try await requestFrame(T.command, bmsAddress: bmsAddress, timeout: timeout)
         return .init(bytes: frame)
     }
 
     /**
      Extract received data into a frame.
      */
-    private func extractFrame(_ data: [UInt8]) throws -> (command: Command.Code, address: UInt8, payload: [UInt8]) {
+    private func extractFrame(_ data: [UInt8]) throws -> Frame {
         guard data.count == frameLength else {
             print("Expected frame with size \(frameLength), but only got \(data.count)")
             throw DalyError.invalidResponseLength
@@ -155,69 +153,75 @@ public class DalyClient {
     /**
      Get information about the state of charge, current and voltage.
      - Parameter timeout: The amount of time to wait for the response.
+     - Parameter bmsAddress: The address of the BMS (default `0x01`)
      - Throws: `DalyError` errors
+     - Note: Some BMS firmwares allow changing the default BMS address. The client checks for the correct address in the BMS responses, and fails if the address is invalid. Only set a different value if you changed the address of your BMS.
      - Returns: An object with the requested information
      */
-    public func getStateOfCharge(timeout: TimeInterval = 1.0) async throws -> StateOfCharge {
-        try await requestFrame(timeout: timeout)
+    public func getStateOfCharge(bmsAddress: UInt8 = 0x01, timeout: TimeInterval = 1.0) async throws -> StateOfCharge {
+        try await requestFrame(bmsAddress: bmsAddress, timeout: timeout)
     }
 
     /**
      Get information about the minimum and maximum voltages.
      - Parameter timeout: The amount of time to wait for the response.
+     - Parameter bmsAddress: The address of the BMS (default `0x01`)
      - Throws: `DalyError` errors
      - Returns: An object with the requested information
      */
-    public func getCellVoltageLimits(timeout: TimeInterval = 1.0) async throws -> CellVoltageLimits {
-        try await requestFrame(timeout: timeout)
+    public func getCellVoltageLimits(bmsAddress: UInt8 = 0x01, timeout: TimeInterval = 1.0) async throws -> CellVoltageLimits {
+        try await requestFrame(bmsAddress: bmsAddress, timeout: timeout)
     }
 
     /**
      Get information about the minimum and maximum cell temperatures.
      - Parameter timeout: The amount of time to wait for the response.
+     - Parameter bmsAddress: The address of the BMS (default `0x01`)
      - Throws: `DalyError` errors
      - Returns: An object with the requested information
      */
-    public func getCellTemperatureLimits(timeout: TimeInterval = 1.0) async throws -> CellTemperatureLimits {
-        try await requestFrame(timeout: timeout)
+    public func getCellTemperatureLimits(bmsAddress: UInt8 = 0x01, timeout: TimeInterval = 1.0) async throws -> CellTemperatureLimits {
+        try await requestFrame(bmsAddress: bmsAddress, timeout: timeout)
     }
 
     /**
      Get information about the state of the charge and discharge MOSFETs.
      - Parameter timeout: The amount of time to wait for the response.
+     - Parameter bmsAddress: The address of the BMS (default `0x01`)
      - Throws: `DalyError` errors
      - Returns: An object with the requested information
      */
-    public func getMosfetStatus(timeout: TimeInterval = 1.0) async throws -> MosfetStatus {
-        try await requestFrame(timeout: timeout)
+    public func getMosfetStatus(bmsAddress: UInt8 = 0x01, timeout: TimeInterval = 1.0) async throws -> MosfetStatus {
+        try await requestFrame(bmsAddress: bmsAddress, timeout: timeout)
     }
 
     /**
      Get information about the device status and configuration.
      - Parameter timeout: The amount of time to wait for the response.
+     - Parameter bmsAddress: The address of the BMS (default `0x01`)
      - Throws: `DalyError` errors
      - Returns: An object with the requested information
      */
-    public func getStatus(timeout: TimeInterval = 1.0) async throws -> StatusInformation {
-        let status: StatusInformation = try await requestFrame(timeout: timeout)
+    public func getStatus(bmsAddress: UInt8 = 0x01, timeout: TimeInterval = 1.0) async throws -> StatusInformation {
+        let status: StatusInformation = try await requestFrame(bmsAddress: bmsAddress, timeout: timeout)
         self.cellTemperatureCount = status.temperatureSensorCount
         self.cellCount = status.cellCount
         return status
     }
 
-    private func getCellCount(timeout: TimeInterval) async throws -> Int {
+    private func getCellCount(bmsAddress: UInt8, timeout: TimeInterval) async throws -> Int {
         if let cellCount {
             return cellCount
         }
-        let status = try await getStatus(timeout: timeout)
+        let status = try await getStatus(bmsAddress: bmsAddress, timeout: timeout)
         return status.cellCount
     }
 
-    private func getCellTemperatureCount(timeout: TimeInterval) async throws -> Int {
+    private func getCellTemperatureCount(bmsAddress: UInt8, timeout: TimeInterval) async throws -> Int {
         if let cellTemperatureCount {
             return cellTemperatureCount
         }
-        let status = try await getStatus(timeout: timeout)
+        let status = try await getStatus(bmsAddress: bmsAddress, timeout: timeout)
         return status.temperatureSensorCount
     }
 
@@ -226,12 +230,13 @@ public class DalyClient {
      - Note: The request requires knowledge about the cell count. This information is contained in a status response.
      If `getStatus()` has not been called before this function, then a `status` request is performed before requesting the cell voltages.
      - Parameter timeout: The amount of time to wait for the response.
+     - Parameter bmsAddress: The address of the BMS (default `0x01`)
      - Throws: `DalyError` errors
      - Returns: An array of voltages (Unit: Volt) for each cell in order.
      */
-    public func getCellVoltages(timeout: TimeInterval = 1.0) async throws -> [Float] {
-        let cellCount = try await getCellCount(timeout: timeout)
-        let frames = try await requestFrames(.cellVoltages(count: cellCount), timeout: timeout)
+    public func getCellVoltages(bmsAddress: UInt8 = 0x01, timeout: TimeInterval = 1.0) async throws -> [Float] {
+        let cellCount = try await getCellCount(bmsAddress: bmsAddress, timeout: timeout)
+        let frames = try await requestFrames(.cellVoltages(count: cellCount), bmsAddress: bmsAddress, timeout: timeout)
 
         let voltageData = try decodeMultipleFramesWithFrameId(frames)
             .reduce([]) { $0 + $1[0...5] }
@@ -251,12 +256,13 @@ public class DalyClient {
      - Note: The request requires knowledge about the temperature sensor count. This information is contained in a status response.
      If `getStatus()` has not been called before this function, then a `status` request is performed before requesting the cell temperatures.
      - Parameter timeout: The amount of time to wait for the response.
+     - Parameter bmsAddress: The address of the BMS (default `0x01`)
      - Throws: `DalyError` errors
      - Returns: An array of temperatures (Unit: °C) for each sensor in order.
      */
-    public func getCellTemperatures(timeout: TimeInterval = 1.0) async throws -> [Float] {
-        let cellTemperatureCount = try await getCellTemperatureCount(timeout: timeout)
-        let frames = try await requestFrames(.temperatures(count: cellTemperatureCount), timeout: timeout)
+    public func getCellTemperatures(bmsAddress: UInt8 = 0x01, timeout: TimeInterval = 1.0) async throws -> [Float] {
+        let cellTemperatureCount = try await getCellTemperatureCount(bmsAddress: bmsAddress, timeout: timeout)
+        let frames = try await requestFrames(.temperatures(count: cellTemperatureCount), bmsAddress: bmsAddress, timeout: timeout)
 
         let temperatures = try decodeMultipleFramesWithFrameId(frames)
             .reduce([], +)
@@ -277,12 +283,13 @@ public class DalyClient {
      - Note: The request requires knowledge about the cell count. This information is contained in a status response.
      If `getStatus()` has not been called before this function, then a `status` request is performed before requesting the balance states.
      - Parameter timeout: The amount of time to wait for the response.
+     - Parameter bmsAddress: The address of the BMS (default `0x01`)
      - Throws: `DalyError` errors
      - Returns: An array of balance states (`true`:  open, `false`: closed) for each cell in order.
      */
-    public func getCellBalanceState(timeout: TimeInterval = 1.0) async throws -> [Bool] {
-        let cellCount = try await getCellCount(timeout: timeout)
-        let frame = try await requestFrame(.balanceStates, timeout: timeout)
+    public func getCellBalanceState(bmsAddress: UInt8 = 0x01, timeout: TimeInterval = 1.0) async throws -> [Bool] {
+        let cellCount = try await getCellCount(bmsAddress: bmsAddress, timeout: timeout)
+        let frame = try await requestFrame(.balanceStates, bmsAddress: bmsAddress, timeout: timeout)
 
         guard frame.count * 8 >= cellCount else {
             // This should never happen, since we check the length of the frame before calling this function
@@ -297,11 +304,12 @@ public class DalyClient {
     /**
      Get information about potential failures of the BMS.
      - Parameter timeout: The amount of time to wait for the response.
+     - Parameter bmsAddress: The address of the BMS (default `0x01`)
      - Throws: `DalyError` errors
      - Returns: An object with the requested information
      */
-    public func getFailures(timeout: TimeInterval = 1.0) async throws -> FailureStatus {
-        try await requestFrame(timeout: timeout)
+    public func getFailures(bmsAddress: UInt8 = 0x01, timeout: TimeInterval = 1.0) async throws -> FailureStatus {
+        try await requestFrame(bmsAddress: bmsAddress, timeout: timeout)
     }
 
     private func decodeMultipleFramesWithFrameId(_ frames: [[UInt8]]) throws -> [[UInt8]] {
