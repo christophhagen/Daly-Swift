@@ -32,6 +32,32 @@ let isCharging = mosfets.status == .charging
 let SoC: Float = socInfo.stateOfCharge // In percent
 ```
 
+### Multiple devices on one interface
+
+This feature is not currently supported.
+The protocol doesn't specify how to address a single device on the bus.
+It may be possible that all devices respond to each request, and the received responses have to be checked for the correct BMS id.
+In any case, this seems to also require changing the BMS address in the firmware.
+As I don't have the required setup, I can't test this behaviour.
+If you have any additional information about this topic, please tell me.
+
+If you set a different BMS address, you have to tell the client:
+
+```swift
+let client = DalyClient(path: "/dev/ttyUSB0", bmsAddress: 0x02)
+```
+
+### Client id
+
+The communication protocol specifies a "Communication module address" sent by the client to the BMS when requesting data.
+This id seems to identify the client in some way, and there seem to be a few accepted values (`0x20`, `0x40`, `0x80`).
+The available documentation is inconsistent which values to use, and it mostly seems to work with any of the common ones.
+Feel free to experiment with this setting, and it's also possible to set a custom value.
+
+```swift
+let client = DalyClient(path: "/dev/ttyUSB0", id: .address0x40)
+```
+
 ## Installation
 
 Simply add the package as a dependency in `Package.swift`:

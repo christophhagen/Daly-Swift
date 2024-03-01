@@ -8,13 +8,19 @@ public class DalyClient {
 
     private let startByte: UInt8 = 0xA5
 
-    private let bmsAddress: UInt8 = 0x01
+    /// The address of the client. Sent by the BMS in the header.
+    public let bmsAddress: UInt8
 
     private let frameLength = 13
 
     private let client: SerialPort
 
-    private let connection: ConnectionType = .uart
+    /**
+     The id of the connecting client (default `0x40)
+
+     It seems that the value identifies the sender of BMS commands, but the values for different sources (e.g. Bluetooth App, Computer) are often switched. The default value should work, but try using different values of you encounter problems.
+     */
+    public let clientId: ClientId
 
     private var cellCount: Int?
 
@@ -23,9 +29,16 @@ public class DalyClient {
     /**
      Create a client.
      - Parameter path: The path to the serial port where the BMS is connected.
+     - Parameter id: The id of the connecting client (default `0x40)
+     - Parameter bmsAddress: The address of the BMS (default `0x01`)
+     - Note: The available documentation is inconsistent on the values of `id`.
+     It seems that the value identifies the sender of BMS commands, but the values for different sources (e.g. Bluetooth App, Computer) are often switched. The default value should work, but try using different values of you encounter problems.
+     - Note: Some BMS firmwares allow changing the default BMS address. The client checks for the correct address in the BMS responses, and fails if the address is invalid. Only set a different value if you changed the address of your BMS.
      */
-    public init(path: String) {
+    public init(path: String, id: ClientId = .address0x40, bmsAddress: UInt8 = 0x01) {
         self.client = SerialPort(path: path)
+        self.clientId = id
+        self.bmsAddress = bmsAddress
     }
 
     /**
@@ -53,7 +66,7 @@ public class DalyClient {
      Create the bytes to transmit in a request.
      */
     private func createRequestData(command: Command) -> [UInt8] {
-        let header = [startByte, connection.rawValue, command.byte]
+        let header = [startByte, clientId.rawValue, command.byte]
         let payload: [UInt8] = [0x00, 0x00, 0x00, 0x00,
                                 0x00, 0x00, 0x00, 0x00]
         let payloadLength = UInt8(payload.count)
@@ -83,7 +96,11 @@ public class DalyClient {
                     throw DalyError.invalidResponseLength
                 }
                 let frameData = Array(responseData[start...end])
-                return try extractBMSFrame(frameData)
+                let frame = try extractFrame(frameData)
+                guard frame.address == bmsAddress else {
+                    throw DalyError.headerMismatch
+                }
+                return (command: frame.command, payload: frame.payload)
             }
             for frame in frames {
                 if frame.command != command.code {
@@ -112,17 +129,6 @@ public class DalyClient {
     private func requestFrame<T>(timeout: TimeInterval) async throws -> T where T: SingleFrameResponse {
         let frame = try await requestFrame(T.command, timeout: timeout)
         return .init(bytes: frame)
-    }
-
-    /**
-     Extract received data from the BMS into a frame.
-     */
-    private func extractBMSFrame(_ data: [UInt8]) throws -> (command: Command.Code, payload: [UInt8]) {
-        let frame = try extractFrame(data)
-        guard frame.address == bmsAddress else {
-            throw DalyError.headerMismatch
-        }
-        return (frame.command, frame.payload)
     }
 
     /**
