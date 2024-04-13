@@ -10,7 +10,10 @@ let package = Package(
             name: "DalySwift",
             targets: ["DalySwift"]),
     ],
-    dependencies: [.package(url: "https://github.com/christophhagen/SwiftSerial", from: "1.0.0")],
+    dependencies: [
+        .package(url: "https://github.com/christophhagen/SwiftSerial", from: "1.0.0"),
+        .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.0.0"),
+    ],
     targets: [
         .target(
             name: "DalySwift",
